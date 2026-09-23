@@ -63,25 +63,27 @@ boot() {
   QEMU_OPTS="-no-reboot -device virtio-serial-pci$1" NIX_DISK_IMAGE=$tmp/disk.qcow2 TMPDIR=$tmp "$vm/bin/run-nixos-vm" </dev/null >>"$out/console.log" 2>&1 || :
   rm -f "$tmp/disk.qcow2"
 }
+fail() {
+  tail -n 40 "$out/console.log" | cat -v >&2
+  die "$@"
+}
 echo "bin/run: console at $out/console.log" >&2
 
 started=$(date -u +%FT%TZ)
-boot "$(cred harness "string=$harness")$(cred argv "file=$tmp/argv")$(cred prompt "file=$prompt")${login:+$(cred login "file=$login")}$(port transcript "$out/transcript.jsonl")$(port tree "$out/tree.tar.zst")"
+boot "$(cred argv "file=$tmp/argv")$(cred prompt "file=$prompt")${login:+$(cred login "file=$login")}$(port transcript "$out/transcript.jsonl")$(port tree "$out/tree.tar.zst")"
 finished=$(date -u +%FT%TZ)
-if [ ! -s "$out/tree.tar.zst" ]; then
-  tail -n 40 "$out/console.log" | cat -v >&2
-  die "the guest did not finish the agent's turn"
-fi
+[ -s "$out/tree.tar.zst" ] || fail "the guest did not finish the agent's turn"
+zstd -dc "$out/tree.tar.zst" >"$tmp/tree.tar"
+
+boot " -drive file=$tmp/tree.tar,format=raw,if=none,id=tree,readonly=on -device virtio-blk-pci,drive=tree,serial=tree$(port check "$out/check.log")$(port status "$tmp/status.json")"
+[ -s "$tmp/status.json" ] || fail "the check VM did not report"
 
 if [ -n "$login" ]; then
   { jq -r '.. | strings' "$login" 2>/dev/null || cat "$login"; } | awk 'length >= 20' >"$tmp/login"
-  zstd -dc "$out/tree.tar.zst" >"$tmp/tree.tar"
   scan=0
   grep -lFf "$tmp/login" "$out"/* "$tmp/tree.tar" >&2 || scan=$?
   [ "$scan" = 1 ] || die "the login appears in the files above, or the scan failed; the run is discarded"
 fi
-
-boot " -fw_cfg name=opt/tree,file=$out/tree.tar.zst$(port check "$out/check.log")$(port status "$tmp/status.json")"
 
 jq -n \
   --arg test "$test" \
@@ -108,4 +110,3 @@ jq -n \
 mkdir -p "$(dirname "$run")"
 mv -T "$out" "$run"
 "$root/bin/metrics" "$run"
-[ -s "$tmp/status.json" ] || die "the check VM did not report; see $run/console.log"

@@ -11,17 +11,23 @@ let
 
   proxy = script "proxy" [ pkgs.socat ];
 
-  job = script "job" [
-    (script "stub" [
-      pkgs.curl
-      pkgs.jq
-    ])
-    (pkgs.writeShellScriptBin "check" (builtins.readFile ./check.sh))
-    pkgs.gnutar
-    pkgs.jq
-    pkgs.util-linux
-    pkgs.zstd
-  ];
+  job = script "job" (
+    [
+      (script "stub" [
+        pkgs.curl
+        pkgs.jq
+      ])
+      (script "check" [
+        pkgs.gnutar
+        pkgs.jq
+        pkgs.util-linux
+      ])
+      pkgs.gnutar
+      pkgs.util-linux
+      pkgs.zstd
+    ]
+    ++ builtins.attrValues harnesses
+  );
 in
 {
   version = builtins.mapAttrs (_: p: p.version) harnesses // {
@@ -44,7 +50,7 @@ in
           writableStoreUseTmpfs = false;
           sharedDirectories = lib.mkForce { };
           qemu.networkingOptions = lib.mkForce [
-            "-nic user,model=virtio,restrict=on,guestfwd=tcp:10.0.2.100:3128-cmd:${lib.getExe proxy}"
+            "-nic user,model=virtio,ipv6=off,restrict=on,guestfwd=tcp:10.0.2.100:3128-cmd:${lib.getExe proxy}"
           ];
         };
         networking.proxy.httpsProxy = "http://10.0.2.100:3128";
@@ -71,7 +77,6 @@ in
             Type = "oneshot";
             ExecStart = lib.getExe job;
             ImportCredential = [
-              "harness"
               "argv"
               "prompt"
               "login"

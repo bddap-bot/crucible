@@ -3,9 +3,9 @@ machine='nproc && free -m && df -h / && findmnt -rn -o TARGET,SOURCE,FSTYPE'
 network=$(
   cat <<'SH'
 probe() { printf "%-40s %-6s " "$1" "$2"; curl -sS -o /dev/null -w "connect %{http_connect} http %{http_code}\n" --max-time 10 "${@:3}" "$1" 2>&1 | paste -sd " "; }
-for url in https://cache.nixos.org/nix-cache-info https://crates.io/ https://index.crates.io/config.json https://static.crates.io/ https://github.com/ https://api.anthropic.com/ \
-  http://10.0.2.2:22/ http://10.0.2.2:631/ http://10.0.2.2:4318/ http://10.0.2.2:8080/ "http://[fec0::2]:631/" http://127.0.0.1:631/ \
-  http://10.0.0.1/ http://172.16.0.1/ http://172.17.0.1/ http://192.168.0.1/ http://192.168.1.1/ http://100.64.0.1/ http://169.254.169.254/ https://1.1.1.1/; do
+for url in https://cache.nixos.org/nix-cache-info https://crates.io/ https://index.crates.io/config.json https://static.crates.io/ https://github.com/ https://api.anthropic.com/ https://example.com/ \
+  http://10.0.2.2:22/ http://10.0.2.2:8080/ "http://[fec0::2]:22/" http://127.0.0.1:22/ \
+  http://10.0.0.1/ http://172.16.0.1/ http://192.168.0.1/ http://192.168.1.1/ http://100.64.0.1/ http://169.254.169.254/ https://1.1.1.1/; do
   probe "$url" direct --noproxy "*"
   probe "$url" proxy --proxytunnel --proxy "$https_proxy"
 done

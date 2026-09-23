@@ -1,6 +1,6 @@
 exec 2>/dev/null
-read -r method target _
-while read -r header && [ -n "${header%$'\r'}" ]; do :; done
+read -r -t 10 method target _
+while read -r -t 10 header && [ -n "${header%$'\r'}" ]; do :; done
 for host in \
   api.anthropic.com api.openai.com auth.openai.com chatgpt.com \
   cache.nixos.org \
