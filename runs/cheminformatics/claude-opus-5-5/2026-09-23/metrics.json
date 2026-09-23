@@ -1,0 +1,32 @@
+{
+  "source": "https://github.com/bddap-bot/chemrs/blob/ee7a91d381edaa07fd82743b1526de1ca17456ae/README.md#session-statistics",
+  "wall_clock_s": 5520,
+  "requests": 186,
+  "tokens": {
+    "input": 79300000,
+    "cache_read": 78600000,
+    "cache_write": 650000,
+    "output": 420000,
+    "thinking": 179000
+  },
+  "tool_calls": 229,
+  "tools": {
+    "Bash": 157,
+    "Edit": 30,
+    "Read": 11,
+    "Write": 31
+  },
+  "peak_context": 680000,
+  "cost_usd": null,
+  "rust_lines": 8900,
+  "tests": {
+    "exit": null,
+    "passed": 65,
+    "failed": null
+  },
+  "clippy": {
+    "exit": null,
+    "warnings": 0
+  },
+  "contamination": null
+}

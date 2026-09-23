@@ -1,0 +1,28 @@
+{
+  "wall_clock_s": 0,
+  "requests": 2,
+  "tokens": {
+    "input": 97,
+    "cache_read": 30,
+    "cache_write": 50,
+    "output": 48,
+    "thinking": null
+  },
+  "tool_calls": {
+    "Bash": 1,
+    "Write": 2
+  },
+  "peak_context": 55,
+  "cost_usd": 0,
+  "rust_lines": 11,
+  "tests": {
+    "exit": 0,
+    "passed": 1,
+    "failed": 0
+  },
+  "clippy": {
+    "exit": 0,
+    "warnings": 0
+  },
+  "contamination": []
+}

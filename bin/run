@@ -1,0 +1,95 @@
+#!/usr/bin/env nix-shell
+#!nix-shell ../shell.nix -i bash
+set -euo pipefail
+
+die() {
+  echo "bin/run: $*" >&2
+  exit 1
+}
+(($# >= 2)) || die "usage: bin/run <test> <model> [--harness H] [--effort E] [--login FILE]"
+
+test=$1
+model=$2
+shift 2
+case $model in
+  claude-*) harness=claude-code ;;
+  gpt-*) harness=codex ;;
+  stub) harness=stub ;;
+  *) harness= ;;
+esac
+effort=medium
+login=
+while (($#)); do
+  case $1 in
+    --harness) harness=$2 ;;
+    --effort) effort=$2 ;;
+    --login) login=$(realpath "$2") ;;
+    *) die "unknown option: $1" ;;
+  esac
+  shift 2
+done
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+prompt=$root/tests/$test/PROMPT.md
+[ -f "$prompt" ] || die "no such test: $test"
+[ -n "$harness" ] || die "no default harness for $model; pass --harness"
+case $model:$harness in
+  stub:stub) ;;
+  stub:* | *:stub) die "the stub model runs only with the stub harness" ;;
+  *) [ -f "$login" ] || die "$harness needs --login FILE" ;;
+esac
+case $login in "$root"/*) die "keep the login outside the repository" ;; esac
+case $root$harness$model$effort$login in *[[:space:],]*) die "no whitespace or commas in paths, model or effort" ;; esac
+[ -w /dev/kvm ] || die "needs read-write /dev/kvm"
+
+vm=$(nix-build --no-out-link "$root/vm")
+run=$root/runs/$test/$model/$(date -u +%Y-%m-%dT%H%M%SZ)
+tmp=$(mktemp -d -p /var/tmp)
+trap 'rm -rf "$tmp"' EXIT
+out=$tmp/out
+mkdir "$out"
+
+cred() { printf ' -fw_cfg name=opt/io.systemd.credentials/%s,%s' "$1" "$2"; }
+port() { printf ' -chardev file,id=%s,path=%s -device virtserialport,chardev=%s,name=%s' "$1" "$2" "$1" "$1"; }
+QEMU_OPTS="-no-reboot -device virtio-serial-pci"
+QEMU_OPTS+=$(cred harness "string=$harness")$(cred model "string=$model")$(cred effort "string=$effort")
+QEMU_OPTS+=$(cred prompt "file=$prompt")${login:+$(cred login "file=$login")}
+QEMU_OPTS+=$(port meta "$tmp/meta.json")$(port transcript "$out/transcript.jsonl")
+QEMU_OPTS+=$(port tree "$out/tree.tar.zst")$(port check "$out/check.log")
+echo "bin/run: console at $out/console.log" >&2
+QEMU_OPTS=$QEMU_OPTS NIX_DISK_IMAGE=$tmp/disk.qcow2 TMPDIR=$tmp "$vm/bin/run-nixos-vm" </dev/null >"$out/console.log" 2>&1
+if [ ! -s "$tmp/meta.json" ]; then
+  tail -n 40 "$out/console.log" | cat -v >&2
+  die "the guest did not finish the agent's turn"
+fi
+
+jq -n \
+  --arg test "$test" \
+  --arg model "$model" \
+  --arg harness "$harness" \
+  --arg effort "$effort" \
+  --arg setup "$({ echo "$vm"; cat "$prompt"; } | sha256sum | cut -d ' ' -f 1)" \
+  --slurpfile meta "$tmp/meta.json" \
+  '$meta[0] as $m | {
+    test: $test,
+    model: $model,
+    harness: {name: $harness, version: $m.version, argv: $m.argv},
+    effort: $effort,
+    setup: $setup,
+    started: $m.started,
+    finished: $m.finished,
+    exit: $m.exit,
+    tree: "tree.tar.zst"
+  }' >"$out/run.json"
+
+if [ -n "$login" ]; then
+  { jq -r '.. | strings' "$login" 2>/dev/null || cat "$login"; } | awk 'length >= 20' >"$tmp/login"
+  zstd -dc "$out/tree.tar.zst" >"$tmp/tree.tar"
+  scan=0
+  grep -lFf "$tmp/login" "$out"/* "$tmp/tree.tar" >&2 || scan=$?
+  [ "$scan" = 1 ] || die "the login appears in the files above, or the scan failed; the run is discarded"
+fi
+
+mkdir -p "$(dirname "$run")"
+mv -T "$out" "$run"
+"$root/bin/metrics" "$run"

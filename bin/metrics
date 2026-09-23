@@ -1,0 +1,89 @@
+#!/usr/bin/env nix-shell
+#!nix-shell ../shell.nix -i bash
+set -euo pipefail
+
+(($# == 1)) || { echo "usage: bin/metrics <run-dir>" >&2; exit 2; }
+root=$(cd "$(dirname "$0")/.." && pwd)
+run=$(realpath "$1")
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+mkdir "$tmp/tree"
+tar -C "$tmp/tree" --zstd -xf "$run/tree.tar.zst"
+chmod -R u+rwX "$tmp/tree"
+rust_lines=$(find "$tmp/tree" -name '*.rs' -type f -exec cat {} + | wc -l)
+
+{
+  printf '%s\n' bddap-bot/crucible bddap-bot/chemrs
+  (cd "$root" && find runs -mindepth 3 -maxdepth 3 -type d) | awk -v self="$(realpath --relative-to="$root" "$run")" '$0 != self'
+} >"$tmp/patterns"
+matches() { grep -rHnoiaF -f "$tmp/patterns" "$@" || [ $? = 1 ]; }
+{ (cd "$run" && matches transcript.jsonl) && (cd "$tmp" && matches tree); } >"$tmp/contamination"
+
+jq -n \
+  --slurpfile run "$run/run.json" \
+  --slurpfile events "$run/transcript.jsonl" \
+  --rawfile check "$run/check.log" \
+  --rawfile contamination "$tmp/contamination" \
+  --argjson rust_lines "$rust_lines" '
+  def tally: group_by(.) | map({key: .[0], value: length}) | from_entries;
+  def claude:
+    [.[] | select(.type == "assistant") | .message] as $blocks
+    | ($blocks | group_by(.id) | map(.[-1].usage)) as $usage
+    | ($usage | map(.input_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)) as $context
+    | {
+        requests: ($usage | length),
+        tokens: {
+          input: ($context | add),
+          cache_read: ($usage | map(.cache_read_input_tokens) | add),
+          cache_write: ($usage | map(.cache_creation_input_tokens) | add),
+          output: ($usage | map(.output_tokens) | add),
+          thinking: null
+        },
+        tools: [$blocks[].content[] | select(.type == "tool_use")] | unique_by(.id) | map(.name),
+        peak_context: ($context | max),
+        cost_usd: (map(select(.type == "result"))[-1].total_cost_usd)
+      };
+  def codex:
+    [.[] | select(.type == "turn.completed") | .usage] as $usage
+    | {
+        requests: null,
+        tokens: {
+          input: ($usage | map(.input_tokens) | add),
+          cache_read: ($usage | map(.cached_input_tokens) | add),
+          cache_write: ($usage | map(.cache_write_input_tokens) | add),
+          output: ($usage | map(.output_tokens) | add),
+          thinking: ($usage | map(.reasoning_output_tokens) | add)
+        },
+        tools: [.[] | select(.type == "item.completed") | .item.type | select(IN("command_execution", "file_change", "mcp_tool_call", "web_search"))],
+        peak_context: null,
+        cost_usd: null
+      };
+  $run[0] as $r
+  | ($check | split("\n")) as $log
+  | def step_exit($step): $log | map(capture("^cargo \($step) exit (?<n>[0-9]+)$").n | tonumber) | first;
+    ($log | map(capture("^test result: \\w+\\. (?<passed>[0-9]+) passed; (?<failed>[0-9]+) failed;"))) as $results
+  | ($events | if $r.harness.name == "codex" then codex
+      elif $r.harness.name == "claude-code" or $r.harness.name == "stub" then claude
+      else error("no transcript format for harness \($r.harness.name)") end) as $t
+  | {
+      wall_clock_s: (($r.finished | fromdate) - ($r.started | fromdate)),
+      requests: $t.requests,
+      tokens: $t.tokens,
+      tool_calls: ($t.tools | tally),
+      peak_context: $t.peak_context,
+      cost_usd: $t.cost_usd,
+      rust_lines: $rust_lines,
+      tests: {
+        exit: step_exit("test"),
+        passed: ($results | map(.passed | tonumber) | add),
+        failed: ($results | map(.failed | tonumber) | add)
+      },
+      clippy: {
+        exit: step_exit("clippy"),
+        warnings: (if step_exit("clippy") then $log | map(select(test("^[^ ]+:[0-9]+:[0-9]+: warning: "))) | length else null end)
+      },
+      contamination: ($contamination | split("\n") | map(select(. != "")))
+    }
+' >"$tmp/metrics.json"
+mv "$tmp/metrics.json" "$run/metrics.json"
