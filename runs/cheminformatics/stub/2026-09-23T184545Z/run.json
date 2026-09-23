@@ -1,0 +1,20 @@
+{
+  "test": "cheminformatics",
+  "model": "stub",
+  "harness": {
+    "name": "stub",
+    "version": null,
+    "argv": [
+      "stub"
+    ]
+  },
+  "effort": "medium",
+  "setup": "17683d810da2b7a8ae29eaa620b1be0f9653c2382d8b788310b62b43c7717cb9",
+  "started": "2026-09-23T18:45:45Z",
+  "finished": "2026-09-23T18:46:25Z",
+  "check": {
+    "test": 0,
+    "clippy": 0
+  },
+  "tree": "tree.tar.zst"
+}

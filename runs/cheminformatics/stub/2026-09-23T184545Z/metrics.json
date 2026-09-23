@@ -1,5 +1,6 @@
 {
-  "wall_clock_s": 0,
+  "wall_clock_s": 40,
+  "completed": true,
   "requests": 2,
   "tokens": {
     "input": 97,
@@ -9,7 +10,7 @@
     "thinking": 25
   },
   "tool_calls": {
-    "Bash": 1,
+    "Bash": 2,
     "Write": 2
   },
   "peak_context": 55,

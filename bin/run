@@ -32,7 +32,13 @@ done
 root=$(cd "$(dirname "$0")/.." && pwd -P)
 prompt=$root/tests/$test/PROMPT.md
 [ -f "$prompt" ] || die "no such test: $test"
-[ -n "$harness" ] || die "no default harness for $model; pass --harness"
+case $harness in
+  claude-code) argv=(claude -p --output-format stream-json --verbose --model "${model}[1m]" --effort "$effort" --dangerously-skip-permissions) ;;
+  codex) argv=(codex exec --json --model "$model" -c "model_reasoning_effort=$effort" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -) ;;
+  stub) argv=(stub) ;;
+  "") die "no default harness for $model; pass --harness" ;;
+  *) die "unknown harness: $harness" ;;
+esac
 case $model:$harness in
   stub:stub) ;;
   stub:* | *:stub) die "the stub model runs only with the stub harness" ;;
@@ -42,46 +48,30 @@ case $login in "$root"/*) die "keep the login outside the repository" ;; esac
 case $root$test$harness$model$effort$login in *[[:space:],]*) die "no whitespace or commas in paths, model or effort" ;; esac
 [ -w /dev/kvm ] || die "needs read-write /dev/kvm"
 
-vm=$(nix-build --no-out-link "$root/vm")
+vm=$(nix-build --no-out-link "$root/vm" -A vm)
+version=$(nix-instantiate --eval --json "$root/vm" -A "version.$harness")
 run=$root/runs/$test/$model/$(date -u +%Y-%m-%dT%H%M%SZ)
 tmp=$(mktemp -d -p /var/tmp)
 trap 'rm -rf "$tmp"' EXIT
 out=$tmp/out
 mkdir "$out"
+printf '%s\0' "${argv[@]}" >"$tmp/argv"
 
 cred() { printf ' -fw_cfg name=opt/io.systemd.credentials/%s,%s' "$1" "$2"; }
 port() { printf ' -chardev file,id=%s,path=%s -device virtserialport,chardev=%s,name=%s' "$1" "$2" "$1" "$1"; }
-QEMU_OPTS="-no-reboot -device virtio-serial-pci"
-QEMU_OPTS+=$(cred harness "string=$harness")$(cred model "string=$model")$(cred effort "string=$effort")
-QEMU_OPTS+=$(cred prompt "file=$prompt")${login:+$(cred login "file=$login")}
-QEMU_OPTS+=$(port meta "$tmp/meta.json")$(port transcript "$out/transcript.jsonl")
-QEMU_OPTS+=$(port tree "$out/tree.tar.zst")$(port check "$out/check.log")
+boot() {
+  QEMU_OPTS="-no-reboot -device virtio-serial-pci$1" NIX_DISK_IMAGE=$tmp/disk.qcow2 TMPDIR=$tmp "$vm/bin/run-nixos-vm" </dev/null >>"$out/console.log" 2>&1 || :
+  rm -f "$tmp/disk.qcow2"
+}
 echo "bin/run: console at $out/console.log" >&2
-qemu=0
-QEMU_OPTS=$QEMU_OPTS NIX_DISK_IMAGE=$tmp/disk.qcow2 TMPDIR=$tmp "$vm/bin/run-nixos-vm" </dev/null >"$out/console.log" 2>&1 || qemu=$?
-if [ "$qemu" != 0 ] || [ ! -s "$tmp/meta.json" ]; then
+
+started=$(date -u +%FT%TZ)
+boot "$(cred harness "string=$harness")$(cred argv "file=$tmp/argv")$(cred prompt "file=$prompt")${login:+$(cred login "file=$login")}$(port transcript "$out/transcript.jsonl")$(port tree "$out/tree.tar.zst")"
+finished=$(date -u +%FT%TZ)
+if [ ! -s "$out/tree.tar.zst" ]; then
   tail -n 40 "$out/console.log" | cat -v >&2
   die "the guest did not finish the agent's turn"
 fi
-
-jq -n \
-  --arg test "$test" \
-  --arg model "$model" \
-  --arg harness "$harness" \
-  --arg effort "$effort" \
-  --arg setup "$({ echo "$vm"; cat "$prompt"; } | sha256sum | cut -d ' ' -f 1)" \
-  --slurpfile meta "$tmp/meta.json" \
-  '$meta[0] as $m | {
-    test: $test,
-    model: $model,
-    harness: {name: $harness, version: $m.version, argv: $m.argv},
-    effort: $effort,
-    setup: $setup,
-    started: $m.started,
-    finished: $m.finished,
-    exit: $m.exit,
-    tree: "tree.tar.zst"
-  }' >"$out/run.json"
 
 if [ -n "$login" ]; then
   { jq -r '.. | strings' "$login" 2>/dev/null || cat "$login"; } | awk 'length >= 20' >"$tmp/login"
@@ -91,6 +81,31 @@ if [ -n "$login" ]; then
   [ "$scan" = 1 ] || die "the login appears in the files above, or the scan failed; the run is discarded"
 fi
 
+boot " -fw_cfg name=opt/tree,file=$out/tree.tar.zst$(port check "$out/check.log")$(port status "$tmp/status.json")"
+
+jq -n \
+  --arg test "$test" \
+  --arg model "$model" \
+  --arg harness "$harness" \
+  --argjson version "$version" \
+  --arg effort "$effort" \
+  --arg setup "$({ echo "$vm"; cat "$prompt"; } | sha256sum | cut -d ' ' -f 1)" \
+  --arg started "$started" \
+  --arg finished "$finished" \
+  --slurpfile check "$tmp/status.json" \
+  '{
+    test: $test,
+    model: $model,
+    harness: {name: $harness, version: $version, argv: $ARGS.positional},
+    effort: $effort,
+    setup: $setup,
+    started: $started,
+    finished: $finished,
+    check: $check[0],
+    tree: "tree.tar.zst"
+  }' --args -- "${argv[@]}" >"$out/run.json"
+
 mkdir -p "$(dirname "$run")"
 mv -T "$out" "$run"
 "$root/bin/metrics" "$run"
+[ -s "$tmp/status.json" ] || die "the check VM did not report; see $run/console.log"

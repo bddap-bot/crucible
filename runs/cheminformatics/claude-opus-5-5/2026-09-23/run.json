@@ -3,12 +3,13 @@
   "model": "claude-opus-5-5",
   "harness": {
     "name": "claude-code",
-    "version": null
+    "version": null,
+    "argv": null
   },
   "effort": "medium",
   "setup": null,
   "started": null,
   "finished": null,
-  "exit": null,
+  "check": null,
   "tree": "https://github.com/bddap-bot/chemrs/tree/ee7a91d381edaa07fd82743b1526de1ca17456ae"
 }

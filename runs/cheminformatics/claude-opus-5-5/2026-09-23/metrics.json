@@ -1,6 +1,7 @@
 {
   "source": "https://github.com/bddap-bot/chemrs/blob/ee7a91d381edaa07fd82743b1526de1ca17456ae/README.md#session-statistics",
   "wall_clock_s": 5520,
+  "completed": null,
   "requests": 186,
   "tokens": {
     "input": 79300000,
@@ -9,8 +10,7 @@
     "output": 420000,
     "thinking": 179000
   },
-  "tool_calls": 229,
-  "tools": {
+  "tool_calls": {
     "Bash": 157,
     "Edit": 30,
     "Read": 11,
