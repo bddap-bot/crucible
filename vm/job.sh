@@ -40,7 +40,7 @@ unset CLAUDE_CODE_OAUTH_TOKEN
 
 jq -n --arg version "$version" --arg started "$started" --arg finished "$finished" --argjson exit "$status" \
   '{version: (if $version == "" then null else $version end), argv: $ARGS.positional, started: $started, finished: $finished, exit: $exit}' \
-  --args "${agent[@]}" >/dev/virtio-ports/meta
+  --args -- "${agent[@]}" >/dev/virtio-ports/meta
 tar -C /home/agent/work --exclude-caches-all --zstd -c . >/dev/virtio-ports/tree || [ $? = 1 ]
 as_agent timeout 1h nix-shell -p cargo rustc clippy --run "$(command -v check)" >/dev/virtio-ports/check 2>&1 ||
   echo "check exit $?" >/dev/virtio-ports/check

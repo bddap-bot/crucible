@@ -29,7 +29,7 @@ while (($#)); do
   shift 2
 done
 
-root=$(cd "$(dirname "$0")/.." && pwd)
+root=$(cd "$(dirname "$0")/.." && pwd -P)
 prompt=$root/tests/$test/PROMPT.md
 [ -f "$prompt" ] || die "no such test: $test"
 [ -n "$harness" ] || die "no default harness for $model; pass --harness"
@@ -39,7 +39,7 @@ case $model:$harness in
   *) [ -f "$login" ] || die "$harness needs --login FILE" ;;
 esac
 case $login in "$root"/*) die "keep the login outside the repository" ;; esac
-case $root$harness$model$effort$login in *[[:space:],]*) die "no whitespace or commas in paths, model or effort" ;; esac
+case $root$test$harness$model$effort$login in *[[:space:],]*) die "no whitespace or commas in paths, model or effort" ;; esac
 [ -w /dev/kvm ] || die "needs read-write /dev/kvm"
 
 vm=$(nix-build --no-out-link "$root/vm")
@@ -57,8 +57,9 @@ QEMU_OPTS+=$(cred prompt "file=$prompt")${login:+$(cred login "file=$login")}
 QEMU_OPTS+=$(port meta "$tmp/meta.json")$(port transcript "$out/transcript.jsonl")
 QEMU_OPTS+=$(port tree "$out/tree.tar.zst")$(port check "$out/check.log")
 echo "bin/run: console at $out/console.log" >&2
-QEMU_OPTS=$QEMU_OPTS NIX_DISK_IMAGE=$tmp/disk.qcow2 TMPDIR=$tmp "$vm/bin/run-nixos-vm" </dev/null >"$out/console.log" 2>&1
-if [ ! -s "$tmp/meta.json" ]; then
+qemu=0
+QEMU_OPTS=$QEMU_OPTS NIX_DISK_IMAGE=$tmp/disk.qcow2 TMPDIR=$tmp "$vm/bin/run-nixos-vm" </dev/null >"$out/console.log" 2>&1 || qemu=$?
+if [ "$qemu" != 0 ] || [ ! -s "$tmp/meta.json" ]; then
   tail -n 40 "$out/console.log" | cat -v >&2
   die "the guest did not finish the agent's turn"
 fi

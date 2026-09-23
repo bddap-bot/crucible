@@ -25,7 +25,7 @@ mod tests {
 RUST
 
 jq -nc --arg prompt "$prompt" --arg command "$command" --arg machine "$machine" --arg cwd "$PWD" '
-  {input_tokens: 12, cache_creation_input_tokens: 30, cache_read_input_tokens: 0, output_tokens: 40} as $first
+  {input_tokens: 12, cache_creation_input_tokens: 30, cache_read_input_tokens: 0, output_tokens: 40, output_tokens_details: {thinking_tokens: 25}} as $first
   | {input_tokens: 5, cache_creation_input_tokens: 20, cache_read_input_tokens: 30, output_tokens: 8} as $second
   | def block($id; $usage; $content): {type: "assistant", message: {id: $id, role: "assistant", usage: $usage, content: [$content]}};
     {type: "system", subtype: "init", cwd: $cwd, model: "stub"},

@@ -28,7 +28,7 @@ jq -n \
   --argjson rust_lines "$rust_lines" '
   def tally: group_by(.) | map({key: .[0], value: length}) | from_entries;
   def claude:
-    [.[] | select(.type == "assistant") | .message] as $blocks
+    [.[] | select(.type == "assistant") | .message | select(.model != "<synthetic>")] as $blocks
     | ($blocks | group_by(.id) | map(.[-1].usage)) as $usage
     | ($usage | map(.input_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)) as $context
     | {
@@ -38,7 +38,7 @@ jq -n \
           cache_read: ($usage | map(.cache_read_input_tokens) | add),
           cache_write: ($usage | map(.cache_creation_input_tokens) | add),
           output: ($usage | map(.output_tokens) | add),
-          thinking: null
+          thinking: ($usage | map(.output_tokens_details.thinking_tokens) | add)
         },
         tools: [$blocks[].content[] | select(.type == "tool_use")] | unique_by(.id) | map(.name),
         peak_context: ($context | max),

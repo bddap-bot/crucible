@@ -6,7 +6,7 @@
     "cache_read": 30,
     "cache_write": 50,
     "output": 48,
-    "thinking": null
+    "thinking": 25
   },
   "tool_calls": {
     "Bash": 1,
