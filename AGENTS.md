@@ -1,5 +1,7 @@
 # AGENTS.md
 
+Edit by subtraction: resolve a problem by deleting code; a tactical patch over a symptom is not accepted. One implementation per thing, never two alive.
+
 ## Layout
 
 - `tests/<test>/`: `PROMPT.md`, fed to the harness on stdin, and `SETUP.md`.
