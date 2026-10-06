@@ -1,6 +1,6 @@
-exec 2>/dev/null
 login=$(<"$CRUCIBLE_LOGIN_FILE")
-read -r -t 10 request
+getline || exit
+request=$line
 case $request in
   "POST /v1/messages "* | "POST /v1/messages?"* | "POST /v1/messages/count_tokens "* | "POST /v1/messages/count_tokens?"*) ;;
   *)
@@ -9,10 +9,10 @@ case $request in
     ;;
 esac
 headers=()
-while read -r -t 10 header && header=${header%$'\r'} && [ -n "$header" ]; do
-  case ${header,,} in
+while getline || exit; line=${line%$'\r'} && [ -n "$line" ]; do
+  case ${line,,} in
     authorization:* | x-api-key:* | host:* | connection:* | proxy-*) ;;
-    *) headers+=("$header") ;;
+    *) headers+=("$line") ;;
   esac
 done
 {

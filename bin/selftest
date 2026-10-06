@@ -23,5 +23,68 @@ hostile() {
   echo "bin/selftest: $name: ok" >&2
 }
 
+fixture() {
+  local name=$1
+  mkdir -p "$tmp/$name/tree"
+  touch "$tmp/$name/check.log" "$tmp/$name/transcript.jsonl"
+  "$name"
+  jq -n '{harness: {name: "stub"}, started: "2026-01-01T00:00:00Z", finished: "2026-01-01T00:00:00Z", check: {test: 0, clippy: 0}}' >"$tmp/$name/run.json"
+  tar -C "$tmp/$name/tree" -S --zstd -cf "$tmp/$name/tree.tar.zst" .
+  (ulimit -v $((1 << 20)) && exec timeout 120 bash "$root/bin/metrics" "$tmp/$name") 2>"$tmp/$name.err"
+}
+measures() {
+  local name=$1 expect=$2
+  if ! { fixture "$name" && jq -e "$expect" "$tmp/$name/metrics.json" >/dev/null; }; then
+    tail -n 20 "$tmp/$name.err" >&2
+    echo "bin/selftest: $name: bin/metrics did not measure $expect" >&2
+    return 1
+  fi
+  echo "bin/selftest: $name: ok" >&2
+}
+refuses() {
+  local name=$1 expect=$2
+  if fixture "$name" || ! grep -qF "$expect" "$tmp/$name.err"; then
+    tail -n 20 "$tmp/$name.err" >&2
+    echo "bin/selftest: $name: bin/metrics did not refuse with \"$expect\"" >&2
+    return 1
+  fi
+  echo "bin/selftest: $name: ok" >&2
+}
+
+links() {
+  head -c 256M /dev/zero | tr '\0' '\n' >"$tmp/links/tree/a.rs"
+  for i in {1..10000}; do ln "$tmp/links/tree/a.rs" "$tmp/links/tree/$i.rs"; done
+}
+sparse() { truncate -s 1T "$tmp/sparse/tree/a.rs"; }
+transcript() { seq 3000000 | sed 's/.*/{}/' >"$tmp/transcript/transcript.jsonl"; }
+check() { head -c 50M /dev/zero | tr '\0' '\n' >"$tmp/check/check.log"; }
+measures links '.rust_lines == 256 * 1024 * 1024'
+refuses sparse "more file data than its archive"
+measures transcript '.requests == 0'
+measures check '.clippy.warnings == 0'
+
+mkdir "$tmp/bin"
+printf '#!/bin/sh\nexec cat\n' >"$tmp/bin/socat"
+chmod +x "$tmp/bin/socat"
+forwarder() { PATH=$tmp/bin:$PATH CRUCIBLE_LOGIN_FILE=/dev/null TMPDIR=$tmp/$name bash -euo pipefail <(cat "$root/vm/admit.sh" "$root/vm/$name.sh"); }
+long=$(printf '%09000d' 0)
+for name in proxy api; do
+  mkdir "$tmp/$name"
+  printf 'POST /v1/messages HTTP/1.1\r\nX-A: %s\r\n\r\n' "$long" | forwarder >"$tmp/$name.out" || :
+  [ ! -s "$tmp/$name.out" ] || { echo "bin/selftest: $name: forwarded a request with a long header" >&2; exit 1; }
+  for _ in {1..64}; do
+    sleep 11 | forwarder >/dev/null &
+  done
+  for _ in {1..100}; do
+    [ ! -e "$tmp/$name/admit.63" ] || break
+    sleep 0.1
+  done
+  sleep 1
+  printf 'POST /v1/messages HTTP/1.1\r\n\r\n' | forwarder >"$tmp/$name.out" || :
+  wait
+  [ ! -s "$tmp/$name.out" ] || { echo "bin/selftest: $name: served past 64 connections" >&2; exit 1; }
+  echo "bin/selftest: $name: ok" >&2
+done
+
 hostile flood "wrote more than" 'head -c 5G /dev/zero'
 hostile bomb "does not unpack within" 'truncate -s 5G zeros'

@@ -9,8 +9,18 @@ let
       text = builtins.readFile ./${name}.sh;
     };
 
-  proxy = script "proxy" [ pkgs.socat ];
-  api = script "api" [ pkgs.socat ];
+  forwarder =
+    name:
+    pkgs.writeShellApplication {
+      inherit name;
+      runtimeInputs = [
+        pkgs.socat
+        pkgs.util-linux
+      ];
+      text = builtins.readFile ./admit.sh + builtins.readFile ./${name}.sh;
+    };
+  proxy = forwarder "proxy";
+  api = forwarder "api";
 
   job = script "job" (
     [

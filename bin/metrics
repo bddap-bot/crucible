@@ -3,33 +3,54 @@
 set -euo pipefail
 
 (($# == 1)) || { echo "usage: bin/metrics <run-dir>" >&2; exit 2; }
+ulimit -v $((512 << 10))
 root=$(cd "$(dirname "$0")/.." && pwd)
 run=$(realpath "$1")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-mkdir "$tmp/tree"
-tar -C "$tmp/tree" --zstd -xf "$run/tree.tar.zst"
-chmod -R u+rwX "$tmp/tree"
-rust_lines=$(find "$tmp/tree" -name '*.rs' -type f -exec cat {} + | wc -l)
+archive() { zstd -qdc "$run/tree.tar.zst"; }
+archive_bytes=$(archive | wc -c)
+rust_files=$(archive | tar -tv --numeric-owner --quoting-style=escape | awk -v archive_bytes="$archive_bytes" '
+  { files += $3 }
+  /^-/ { rust += /\.rs$/ }
+  END {
+    if (files > archive_bytes) { print "bin/metrics: the tree holds more file data than its archive" > "/dev/stderr"; exit 1 }
+    print rust + 0
+  }
+')
+rust_lines=0
+((rust_files == 0)) || rust_lines=$(archive | tar -xO --wildcards '*.rs' | wc -l)
 
 {
   printf '%s\n' bddap-bot/crucible bddap-bot/chemrs
   (cd "$root" && find runs -mindepth 3 -maxdepth 3 -type d) | awk -v self="$(realpath --relative-to="$root" "$run")" '$0 != self'
 } >"$tmp/patterns"
-matches() { grep -rHnoiaF -f "$tmp/patterns" "$@" || [ $? = 1 ]; }
-{ (cd "$run" && matches transcript.jsonl) && (cd "$tmp" && matches tree); } >"$tmp/contamination"
+matches() { grep -HnoiaF -f "$tmp/patterns" "$@" || [ $? = 1 ]; }
+{ (cd "$run" && matches transcript.jsonl) && archive | matches --label=tree.tar; } >"$tmp/contamination"
+
+check=$({ grep -aE '^(test result: \w+\. [0-9]+ passed; [0-9]+ failed;|[^ ]+:[0-9]+:[0-9]+: warning: )' "$run/check.log" || [ $? = 1 ]; } | jq -nR '
+  reduce (inputs | split(" ")) as $w ({warnings: 0};
+    if $w[0:2] == ["test", "result:"] then .passed += ($w[3] | tonumber) | .failed += ($w[5] | tonumber) else .warnings += 1 end)
+')
 
 jq -n \
   --slurpfile run "$run/run.json" \
-  --slurpfile events "$run/transcript.jsonl" \
-  --rawfile check "$run/check.log" \
+  --argjson check "$check" \
   --rawfile contamination "$tmp/contamination" \
   --argjson rust_lines "$rust_lines" '
   def tally: group_by(.) | map({key: .[0], value: length}) | from_entries;
   def claude:
-    [.[] | select(.type == "assistant") | .message | select(.model != "<synthetic>")] as $blocks
-    | ($blocks | group_by(.id) | map(.[-1].usage)) as $usage
+    reduce inputs as $e ({usage: {}, tools: {}, completed: false, cost: null};
+      if $e.type == "result" then .completed = ($e.is_error == false) | .cost = $e.total_cost_usd
+      else
+        (if .completed then .completed = false else . end)
+        | if $e.type == "assistant" and $e.message.model != "<synthetic>" then
+            .usage[$e.message.id | tojson] = $e.message.usage
+            | reduce ($e.message.content[] | select(.type == "tool_use")) as $u (.; .tools[$u.id | tojson] //= $u.name)
+          else . end
+      end)
+    | [.usage[]] as $usage
     | ($usage | map(.input_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)) as $context
     | {
         requests: ($usage | length),
@@ -40,15 +61,13 @@ jq -n \
           output: ($usage | map(.output_tokens) | add),
           thinking: ($usage | map(.output_tokens_details.thinking_tokens) | add)
         },
-        tools: [$blocks[].content[] | select(.type == "tool_use")] | unique_by(.id) | map(.name),
-        completed: (last | .type == "result" and .is_error == false),
+        tools: [.tools[]],
+        completed,
         peak_context: ($context | max),
-        cost_usd: (map(select(.type == "result"))[-1].total_cost_usd)
+        cost_usd: .cost
       };
   $run[0] as $r
-  | ($check | split("\n")) as $log
-  | ($log | map(capture("^test result: \\w+\\. (?<passed>[0-9]+) passed; (?<failed>[0-9]+) failed;"))) as $results
-  | ($events | if $r.harness.name == "claude-code" or $r.harness.name == "stub" then claude
+  | (if $r.harness.name == "claude-code" or $r.harness.name == "stub" then claude
       else error("no transcript format for harness \($r.harness.name)") end) as $t
   | {
       wall_clock_s: (($r.finished | fromdate) - ($r.started | fromdate)),
@@ -61,14 +80,14 @@ jq -n \
       rust_lines: $rust_lines,
       tests: {
         exit: $r.check.test,
-        passed: ($results | map(.passed | tonumber) | add),
-        failed: ($results | map(.failed | tonumber) | add)
+        passed: $check.passed,
+        failed: $check.failed
       },
       clippy: {
         exit: $r.check.clippy,
-        warnings: (if $r.check.clippy != null then $log | map(select(test("^[^ ]+:[0-9]+:[0-9]+: warning: "))) | length else null end)
+        warnings: (if $r.check.clippy != null then $check.warnings else null end)
       },
       contamination: ($contamination | split("\n") | map(select(. != "")))
     }
-' >"$tmp/metrics.json"
+' "$run/transcript.jsonl" >"$tmp/metrics.json"
 mv "$tmp/metrics.json" "$run/metrics.json"

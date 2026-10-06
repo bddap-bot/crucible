@@ -1,6 +1,6 @@
-exec 2>/dev/null
-read -r -t 10 method target _
-while read -r -t 10 header && [ -n "${header%$'\r'}" ]; do :; done
+getline || exit
+read -r method target _ <<<"$line"
+while getline || exit; [ -n "${line%$'\r'}" ]; do :; done
 for host in \
   cache.nixos.org \
   crates.io index.crates.io static.crates.io \

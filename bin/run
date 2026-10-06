@@ -119,6 +119,6 @@ jq -n \
     tree: "tree.tar.zst"
   }' --args -- "${argv[@]}" >"$out/run.json"
 
+capped timeout 1h "$root/bin/metrics" "$out" || die "bin/metrics failed; the run is discarded"
 mkdir -p "$(dirname "$run")"
 mv -T "$out" "$run"
-capped "$root/bin/metrics" "$run"
