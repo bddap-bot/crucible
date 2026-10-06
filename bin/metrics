@@ -45,27 +45,10 @@ jq -n \
         peak_context: ($context | max),
         cost_usd: (map(select(.type == "result"))[-1].total_cost_usd)
       };
-  def codex:
-    [.[] | select(.type == "turn.completed") | .usage] as $usage
-    | {
-        requests: null,
-        tokens: {
-          input: ($usage | map(.input_tokens) | add),
-          cache_read: ($usage | map(.cached_input_tokens) | add),
-          cache_write: ($usage | map(.cache_write_input_tokens) | add),
-          output: ($usage | map(.output_tokens) | add),
-          thinking: ($usage | map(.reasoning_output_tokens) | add)
-        },
-        tools: [.[] | select(.type == "item.completed") | .item.type | select(IN("command_execution", "file_change", "mcp_tool_call", "web_search"))],
-        completed: (last | .type == "turn.completed"),
-        peak_context: null,
-        cost_usd: null
-      };
   $run[0] as $r
   | ($check | split("\n")) as $log
   | ($log | map(capture("^test result: \\w+\\. (?<passed>[0-9]+) passed; (?<failed>[0-9]+) failed;"))) as $results
-  | ($events | if $r.harness.name == "codex" then codex
-      elif $r.harness.name == "claude-code" or $r.harness.name == "stub" then claude
+  | ($events | if $r.harness.name == "claude-code" or $r.harness.name == "stub" then claude
       else error("no transcript format for harness \($r.harness.name)") end) as $t
   | {
       wall_clock_s: (($r.finished | fromdate) - ($r.started | fromdate)),

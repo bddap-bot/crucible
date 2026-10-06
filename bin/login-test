@@ -1,0 +1,24 @@
+#!/usr/bin/env nix-shell
+#!nix-shell ../shell.nix -i bash
+set -euo pipefail
+
+fail() {
+  echo "bin/login-test: $*" >&2
+  exit 1
+}
+
+root=$(cd "$(dirname "$0")/.." && pwd -P)
+tmp=$(mktemp -d -p /var/tmp)
+trap 'rm -rf "$tmp"' EXIT
+cp -a "$root" "$tmp/repo"
+head -c 48 /dev/urandom | base64 -w0 >"$tmp/login"
+
+"$tmp/repo/bin/run" cheminformatics stub --login "$tmp/login"
+run=$(find "$tmp/repo/runs/cheminformatics/stub" -mindepth 1 -maxdepth 1 -newer "$tmp/login" -type d)
+[ -n "$run" ] || fail "the stub run was not saved"
+jq -e '.message.content[]? | select(.tool_use_id == "toolu_3") | .content | split("\n") | index("stub")' "$run/transcript.jsonl" >/dev/null || fail "the stub did not read the guest's credentials"
+jq -e '.message.content[]? | select(.tool_use_id == "toolu_2") | .content | test("10.0.2.100/v1/messages +api +connect 000 http 401")' "$run/transcript.jsonl" >/dev/null || fail "the guest's model API request did not reach the API through the host"
+if grep -qaF -f "$tmp/login" < <(zstd -dc "$run/tree.tar.zst" && cat "$run"/*); then
+  fail "the guest could read the login"
+fi
+echo "bin/login-test: the guest used the login without seeing it"

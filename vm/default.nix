@@ -1,6 +1,6 @@
 let
   pkgs = import (import ./sources.nix).nixpkgs { config.allowUnfree = true; };
-  harnesses = { inherit (pkgs) claude-code codex; };
+  harnesses = { inherit (pkgs) claude-code; };
 
   script =
     name: runtimeInputs:
@@ -10,6 +10,7 @@ let
     };
 
   proxy = script "proxy" [ pkgs.socat ];
+  api = script "api" [ pkgs.socat ];
 
   job = script "job" (
     [
@@ -50,10 +51,17 @@ in
           writableStoreUseTmpfs = false;
           sharedDirectories = lib.mkForce { };
           qemu.networkingOptions = lib.mkForce [
-            "-nic user,model=virtio,ipv6=off,restrict=on,guestfwd=tcp:10.0.2.100:3128-cmd:${lib.getExe proxy}"
+            "-nic user,model=virtio,ipv6=off,restrict=on,guestfwd=tcp:10.0.2.100:3128-cmd:${lib.getExe proxy},guestfwd=tcp:10.0.2.100:80-cmd:${lib.getExe api}"
           ];
         };
-        networking.proxy.httpsProxy = "http://10.0.2.100:3128";
+        networking.proxy = {
+          httpsProxy = "http://10.0.2.100:3128";
+          noProxy = "127.0.0.1,localhost,10.0.2.100";
+        };
+        environment.variables = {
+          ANTHROPIC_BASE_URL = "http://10.0.2.100";
+          CLAUDE_CODE_OAUTH_TOKEN = "held-by-the-host";
+        };
 
         nix.nixPath = [ "nixpkgs=${pkgs.path}" ];
         environment.systemPackages = [ pkgs.git ] ++ builtins.attrValues harnesses;
@@ -79,7 +87,6 @@ in
             ImportCredential = [
               "argv"
               "prompt"
-              "login"
             ];
             StandardOutput = "journal+console";
           };

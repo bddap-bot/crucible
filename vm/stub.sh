@@ -9,10 +9,13 @@ for url in https://cache.nixos.org/nix-cache-info https://crates.io/ https://ind
   probe "$url" direct --noproxy "*"
   probe "$url" proxy --proxytunnel --proxy "$https_proxy"
 done
+probe http://10.0.2.100/v1/messages api -d {}
 SH
 )
+credentials='sudo sh -c "cat /run/credentials/*/* /sys/firmware/qemu_fw_cfg/by_name/opt/*/*/raw /sys/firmware/dmi/entries/11-*/raw /proc/cmdline /proc/[0-9]*/environ" | tr "\0" "\n" | sort -u'
 machine_out=$(bash -c "$machine")
 network_out=$(bash -c "$network")
+credentials_out=$(bash -c "$credentials" 2>&1)
 
 cat >Cargo.toml <<'TOML'
 [package]
@@ -36,7 +39,7 @@ mod tests {
 }
 RUST
 
-jq -nc --arg prompt "$prompt" --arg machine "$machine" --arg machine_out "$machine_out" --arg network "$network" --arg network_out "$network_out" --arg cwd "$PWD" '
+jq -nc --arg prompt "$prompt" --arg machine "$machine" --arg machine_out "$machine_out" --arg network "$network" --arg network_out "$network_out" --arg credentials "$credentials" --arg credentials_out "$credentials_out" --arg cwd "$PWD" '
   {input_tokens: 12, cache_creation_input_tokens: 30, cache_read_input_tokens: 0, output_tokens: 40, output_tokens_details: {thinking_tokens: 25}} as $first
   | {input_tokens: 5, cache_creation_input_tokens: 20, cache_read_input_tokens: 30, output_tokens: 8} as $second
   | def block($id; $usage; $content): {type: "assistant", message: {id: $id, role: "assistant", usage: $usage, content: [$content]}};
@@ -44,13 +47,15 @@ jq -nc --arg prompt "$prompt" --arg machine "$machine" --arg machine_out "$machi
     block("msg_1"; $first; {type: "text", text: ("Prompt received:\n" + $prompt)}),
     block("msg_1"; $first; {type: "tool_use", id: "toolu_1", name: "Bash", input: {command: $machine}}),
     block("msg_1"; $first; {type: "tool_use", id: "toolu_2", name: "Bash", input: {command: $network}}),
-    block("msg_1"; $first; {type: "tool_use", id: "toolu_3", name: "Write", input: {file_path: "Cargo.toml"}}),
-    block("msg_1"; $first; {type: "tool_use", id: "toolu_4", name: "Write", input: {file_path: "src/lib.rs"}}),
+    block("msg_1"; $first; {type: "tool_use", id: "toolu_3", name: "Bash", input: {command: $credentials}}),
+    block("msg_1"; $first; {type: "tool_use", id: "toolu_4", name: "Write", input: {file_path: "Cargo.toml"}}),
+    block("msg_1"; $first; {type: "tool_use", id: "toolu_5", name: "Write", input: {file_path: "src/lib.rs"}}),
     {type: "user", message: {role: "user", content: [
       {type: "tool_result", tool_use_id: "toolu_1", content: $machine_out},
       {type: "tool_result", tool_use_id: "toolu_2", content: $network_out},
-      {type: "tool_result", tool_use_id: "toolu_3", content: "ok"},
-      {type: "tool_result", tool_use_id: "toolu_4", content: "ok"}
+      {type: "tool_result", tool_use_id: "toolu_3", content: $credentials_out},
+      {type: "tool_result", tool_use_id: "toolu_4", content: "ok"},
+      {type: "tool_result", tool_use_id: "toolu_5", content: "ok"}
     ]}},
     block("msg_2"; $second; {type: "text", text: "Done."}),
     {type: "result", subtype: "success", is_error: false, num_turns: 2, total_cost_usd: 0}

@@ -13,7 +13,6 @@ model=$2
 shift 2
 case $model in
   claude-*) harness=claude-code ;;
-  gpt-*) harness=codex ;;
   stub) harness=stub ;;
   *) harness= ;;
 esac
@@ -34,7 +33,6 @@ prompt=$root/tests/$test/PROMPT.md
 [ -f "$prompt" ] || die "no such test: $test"
 case $harness in
   claude-code) argv=(claude -p --output-format stream-json --verbose --model "${model}[1m]" --effort "$effort" --dangerously-skip-permissions) ;;
-  codex) argv=(codex exec --json --model "$model" -c "model_reasoning_effort=$effort" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -) ;;
   stub) argv=(stub) ;;
   "") die "no default harness for $model; pass --harness" ;;
   *) die "unknown harness: $harness" ;;
@@ -45,7 +43,7 @@ case $model:$harness in
   *) [ -f "$login" ] || die "$harness needs --login FILE" ;;
 esac
 case $login in "$root"/*) die "keep the login outside the repository" ;; esac
-case $root$test$harness$model$effort$login in *[[:space:],]*) die "no whitespace or commas in paths, model or effort" ;; esac
+case $root$test$harness$model$effort in *[[:space:],]*) die "no whitespace or commas in paths, model or effort" ;; esac
 [ -w /dev/kvm ] || die "needs read-write /dev/kvm"
 
 vm=$(nix-build --no-out-link "$root/vm" -A vm)
@@ -70,20 +68,13 @@ fail() {
 echo "bin/run: console at $out/console.log" >&2
 
 started=$(date -u +%FT%TZ)
-boot "$(cred argv "file=$tmp/argv")$(cred prompt "file=$prompt")${login:+$(cred login "file=$login")}$(port transcript "$out/transcript.jsonl")$(port tree "$out/tree.tar.zst")"
+CRUCIBLE_LOGIN_FILE=$login boot "$(cred argv "file=$tmp/argv")$(cred prompt "file=$prompt")$(port transcript "$out/transcript.jsonl")$(port tree "$out/tree.tar.zst")"
 finished=$(date -u +%FT%TZ)
 [ -s "$out/tree.tar.zst" ] || fail "the guest did not finish the agent's turn"
 zstd -dc "$out/tree.tar.zst" >"$tmp/tree.tar"
 
-boot " -drive file=$tmp/tree.tar,format=raw,if=none,id=tree,readonly=on -device virtio-blk-pci,drive=tree,serial=tree$(port check "$out/check.log")$(port status "$tmp/status.json")"
+CRUCIBLE_LOGIN_FILE='' boot " -drive file=$tmp/tree.tar,format=raw,if=none,id=tree,readonly=on -device virtio-blk-pci,drive=tree,serial=tree$(port check "$out/check.log")$(port status "$tmp/status.json")"
 [ -s "$tmp/status.json" ] || fail "the check VM did not report"
-
-if [ -n "$login" ]; then
-  { jq -r '.. | strings' "$login" 2>/dev/null || cat "$login"; } | awk 'length >= 20' >"$tmp/login"
-  scan=0
-  grep -lFf "$tmp/login" "$out"/* "$tmp/tree.tar" >&2 || scan=$?
-  [ "$scan" = 1 ] || die "the login appears in the files above, or the scan failed; the run is discarded"
-fi
 
 jq -n \
   --arg test "$test" \

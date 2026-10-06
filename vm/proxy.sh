@@ -2,7 +2,6 @@ exec 2>/dev/null
 read -r -t 10 method target _
 while read -r -t 10 header && [ -n "${header%$'\r'}" ]; do :; done
 for host in \
-  api.anthropic.com api.openai.com auth.openai.com chatgpt.com \
   cache.nixos.org \
   crates.io index.crates.io static.crates.io \
   github.com api.github.com codeload.github.com objects.githubusercontent.com raw.githubusercontent.com release-assets.githubusercontent.com; do
