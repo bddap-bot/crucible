@@ -1,0 +1,27 @@
+#!/usr/bin/env nix-shell
+#!nix-shell ../shell.nix -i bash
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd -P)
+tmp=$(mktemp -d -p /var/tmp)
+trap 'rm -rf "$tmp"' EXIT
+
+hostile() {
+  local name=$1 expect=$2 stub=$3
+  rm -rf "$tmp/repo"
+  cp -a "$root" "$tmp/repo"
+  printf '%s\n' "$stub" >"$tmp/repo/vm/stub.sh"
+  if "$tmp/repo/bin/run" cheminformatics stub 2>"$tmp/$name.err"; then
+    echo "bin/selftest: $name: bin/run kept the run" >&2
+    return 1
+  fi
+  grep -qF "$expect" "$tmp/$name.err" || {
+    tail -n 20 "$tmp/$name.err" >&2
+    echo "bin/selftest: $name: bin/run failed for another reason" >&2
+    return 1
+  }
+  echo "bin/selftest: $name: ok" >&2
+}
+
+hostile flood "wrote more than" 'head -c 5G /dev/zero'
+hostile bomb "does not unpack within" 'truncate -s 5G zeros'

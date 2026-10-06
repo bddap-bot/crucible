@@ -13,7 +13,9 @@ never holds the login; `bin/login-test` checks that.
 
 Treat parsed test counts and warnings as untrusted: submitted code can write
 `check.log`. The check VM's protected exit-code port is the execution result.
-`bin/metrics` checks contamination; it is no substitute for inspecting evidence.
+`bin/run` caps every output the guest writes and discards a run that exceeds it;
+`bin/selftest` checks that against hostile stubs. `bin/metrics` checks contamination;
+it is no substitute for inspecting evidence.
 
 The imported initial run has only `run.json` and `metrics.json`; `bin/metrics`
 cannot recompute it.
